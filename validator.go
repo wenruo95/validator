@@ -4,18 +4,32 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 )
 
-var once sync.Once
-var fns map[string]CheckerFunc = make(map[string]CheckerFunc)
+type ValidateKey string
+type ValidateOption func(v *validator)
 
-type CheckerFunc func(v interface{}) error
+func WithKey(key ValidateKey, value interface{}) ValidateOption {
+	return func(v *validator) {
+		v.append(key, value)
+	}
+}
 
-func Register(key string, fn CheckerFunc) {
-	once.Do(func() {
-		fns = make(map[string]CheckerFunc)
-	})
+func FastFail(fastFail bool) ValidateOption {
+	return func(v *validator) {
+		v.fastFail = fastFail
+	}
+}
+
+var fns map[ValidateKey]ValidateFunc
+
+func init() {
+	fns = make(map[ValidateKey]ValidateFunc)
+}
+
+type ValidateFunc func(v interface{}) error
+
+func Register(key ValidateKey, fn ValidateFunc) {
 	if _, ok := fns[key]; ok {
 		panic("dumplicate key:" + key + " in validator")
 	}
@@ -26,14 +40,14 @@ type Validator interface {
 	Validate() error
 }
 
-type checkItem struct {
-	key   string
+type validateItem struct {
+	key   ValidateKey
 	value interface{}
 }
 type validator struct {
-	fastFail  bool
-	checkList []*checkItem
-	checkFunc map[string]CheckerFunc
+	fastFail     bool
+	validateList []*validateItem
+	validateFunc map[ValidateKey]ValidateFunc
 }
 
 func New(opts ...ValidateOption) *validator {
@@ -43,14 +57,14 @@ func New(opts ...ValidateOption) *validator {
 	}
 	return v
 }
-func (v *validator) append(key string, value interface{}) {
-	v.checkList = append(v.checkList, &checkItem{key: key, value: value})
+func (v *validator) append(key ValidateKey, value interface{}) {
+	v.validateList = append(v.validateList, &validateItem{key: key, value: value})
 }
 
 func (v *validator) Validate() error {
 
 	var errlist []string
-	for idx, item := range v.checkList {
+	for idx, item := range v.validateList {
 
 		fn, ok := fns[item.key]
 		if !ok {
